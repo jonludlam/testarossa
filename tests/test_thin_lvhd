@@ -1,0 +1,58 @@
+#!/usr/bin/env ocamlscript
+(* Thin lvhd tests *)
+Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"];
+Ocaml.sources := ["../scripts/yorick.ml"]
+--
+open Yorick
+open Lwt
+open Xen_api
+open Xen_api_lwt_unix
+
+let uri = ref "http://gandalf.uk.xensource.com"
+let username = ref "root"
+let password = ref "xenroot"
+
+let setup_infra () =
+  ?| "vagrant up infrastructure --provider=xenserver";
+  let wwn = ?|> "vagrant ssh infrastructure -c \"/scripts/get_wwn.py\"" |> trim in
+  let ip = ?|> "vagrant ssh infrastructure -c \"/scripts/get_ip.sh\"" |> trim in
+  (wwn,ip)
+
+let setup_pool () =
+  ?| "vagrant up host1 --provider=xenserver";
+  ?| "vagrant ssh host1 -c \"sudo cp /xs/xapi /opt/xensource/bin/\" || true";
+  ?| "vagrant ssh host1 -c \"sudo vagrant-xenserver-scripts/start.sh\"";
+  ?| "vagrant up host2 --provider=xenserver";
+  ?| "vagrant ssh host2 -c \"sudo cp /xs/xapi /opt/xensource/bin/\" || true";
+  ?| "vagrant ssh host2 -c \"sudo vagrant-xenserver-scripts/start.sh\"";
+  let master_ip = ?|> "vagrant ssh host1 -c \"sudo xe host-list params=address --minimal\"" |> trim in
+  let slave_uuid = ?|> "vagrant ssh host2 -c \"sudo xe host-list params=uuid --minimal\"" |> trim in
+  ?|. "vagrant ssh host2 -c \"sudo xe pool-join master-address=%s master-username=root master-password=xenroot\"" master_ip;
+  let rec wait () =
+    let enabled = ?|> "vagrant ssh host1 -c \"sudo xe host-list uuid=%s params=enabled --minimal\"" slave_uuid |> trim in
+    if enabled = "true" then () else (Unix.sleep 1; wait ())
+  in wait ();
+  Unix.sleep 10
+
+let setup_acls () =
+  let hosts = ?|> "vagrant ssh host1 -c \"sudo xe host-list params=uuid --minimal\"" |> trim |> xapilist in
+  let acls = List.map (fun host -> ?|> "vagrant ssh host1 -c \"sudo xe host-param-get uuid=%s param-name=other-config param-key=iscsi_iqn\"" host |> trim) hosts in
+  List.iter (fun iqn -> ?|. "vagrant ssh infrastructure -c \"sudo /scripts/add_acl.py %s\"" iqn) acls
+
+let get_uuid () =
+  ?|> "ocamlscript scripts/get_vagrant_uuid.ml host3"
+
+      
+let _ =
+  let (wwn,ip) = setup_infra () in
+  let _ = setup_pool () in
+  let _ = setup_acls () in
+  let xml = !?? (?|>) "vagrant ssh host1 -c \"sudo xe sr-probe type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s\" | grep \\<SCSIid\\>" ip wwn |> trim in
+  let scsiid = String.sub xml 8 (String.length xml - 17) in
+  let sr = ?|> "vagrant ssh host1 -c \"sudo xe sr-create type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s device-config:SCSIid=%s shared=true sm-config:allocation=dynamic name-label=thinlvhd\"" ip wwn scsiid in
+  Printf.printf "sr=%s" sr
+  
+  
+
+
+
