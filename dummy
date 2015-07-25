@@ -1,7 +1,0 @@
-HTTP/1.1 500 Internal Error
-content-length: 266
-content-type:text/html
-connection:close
-cache-control:no-cache, no-store
-
-<html><body><h1>HTTP 500 internal server error</h1>An unexpected error occurred; please wait a while and try again. If the problem persists, please contact your support representative.<h1> Additional information </h1>VDI_IO_ERROR: [ Device I/O errors ]</body></html>

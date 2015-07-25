@@ -12,21 +12,19 @@ let uri = ref "http://gandalf.uk.xensource.com"
 let username = ref "root"
 let password = ref "xenroot"
 
+let start_all () =
+  ?| "vagrant up host1 host2 infrastructure --parallel --provider=xenserver"
+
 let setup_infra () =
-  ?| "vagrant up infrastructure --provider=xenserver";
   let wwn = ?|> "vagrant ssh infrastructure -c \"/scripts/get_wwn.py\"" |> trim in
   let ip = ?|> "vagrant ssh infrastructure -c \"/scripts/get_ip.sh\"" |> trim in
   (wwn,ip)
 
 let setup_pool () =
-  ?| "vagrant up host1 --provider=xenserver";
-  ?| "vagrant ssh host1 -c \"sudo cp /xs/xapi /opt/xensource/bin/\" || true";
-  ?| "vagrant ssh host1 -c \"sudo vagrant-xenserver-scripts/start.sh\"";
-  ?| "vagrant up host2 --provider=xenserver";
-  ?| "vagrant ssh host2 -c \"sudo cp /xs/xapi /opt/xensource/bin/\" || true";
-  ?| "vagrant ssh host2 -c \"sudo vagrant-xenserver-scripts/start.sh\"";
   let master_ip = ?|> "vagrant ssh host1 -c \"sudo xe host-list params=address --minimal\"" |> trim in
+  Printf.fprintf stderr "master_ip=%s" master_ip;
   let slave_uuid = ?|> "vagrant ssh host2 -c \"sudo xe host-list params=uuid --minimal\"" |> trim in
+  Printf.fprintf stderr "slave_uuid=%s" slave_uuid;
   ?|. "vagrant ssh host2 -c \"sudo xe pool-join master-address=%s master-username=root master-password=xenroot\"" master_ip;
   let rec wait () =
     let enabled = ?|> "vagrant ssh host1 -c \"sudo xe host-list uuid=%s params=enabled --minimal\"" slave_uuid |> trim in
@@ -44,13 +42,19 @@ let get_uuid () =
 
       
 let _ =
+  start_all ();
+  Printf.printf "XXXX started\n%!";
   let (wwn,ip) = setup_infra () in
+  Printf.printf "XXXX setup_infra finished\n%!";
   let _ = setup_pool () in
-  let _ = setup_acls () in
-  let xml = !?? (?|>) "vagrant ssh host1 -c \"sudo xe sr-probe type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s\" | grep \\<SCSIid\\>" ip wwn |> trim in
+  Printf.printf "XXXX setup_pool finished\n%!";
+(*  let _ = setup_acls () in*)
+(*  Printf.printf "XXXX setup_acls finished\n%!";*)
+  let xml = !?? (?|>) "vagrant ssh host1 -c \"sudo xe sr-probe type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s\" | grep \\<SCSIid\\> | head -n 1" ip wwn |> trim in
+  Printf.printf "XXXX probed\n%!";
   let scsiid = String.sub xml 8 (String.length xml - 17) in
   let sr = ?|> "vagrant ssh host1 -c \"sudo xe sr-create type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s device-config:SCSIid=%s shared=true sm-config:allocation=dynamic name-label=thinlvhd\"" ip wwn scsiid in
-  Printf.printf "sr=%s" sr
+  Printf.printf "sr=%s\n%!" sr
   
   
 
