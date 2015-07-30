@@ -15,35 +15,21 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     infra.vm.network "public_network", bridge: "xenbr0"
   end
 
-  config.vm.define "host1" do |host1|
-    host1.vm.box = "jonludlam/xs-trunk-ring3"
-    host1.vm.provision "shell",
-      inline: "hostname host1; echo host1 > /etc/hostname"
-    host1.vm.synced_folder "xs", "/xs"
-    host1.vm.provision "shell", path: "scripts/xs/update.sh"
-    host1.vm.network "public_network", bridge: "xenbr0"
-  end
+  (1..3).each do |i|
+    config.vm.define "host#{i}" do |host|
+      host.vm.box = "jonludlam/xs-thin-lvhd"
+      host.vm.provision "shell",
+        inline: "hostname host#{i}; echo host#{i} > /etc/hostname"
+      host.vm.synced_folder "xs", "/xs"
+      host.vm.synced_folder "scripts/xs", "/scripts"
 
-  config.vm.define "host2" do |host2|
-    host2.vm.box = "jonludlam/xs-trunk-ring3"
-    host2.vm.provision "shell",
-      inline: "hostname host2; echo host2 > /etc/hostname"
-    host2.vm.synced_folder "xs", "/xs"
-    host2.vm.provision "shell", path: "scripts/xs/update.sh"
-    host2.vm.network "public_network", bridge: "xenbr0"
-  end
-
-  config.vm.define "host3" do |host3|
-    host3.vm.box = "jonludlam/xs-trunk-ring3"
-    host3.vm.provision "shell",
-      inline: "hostname host3; echo host3 > /etc/hostname"
-    host3.vm.synced_folder "xs", "/xs"
-    host3.vm.provision "shell", path: "scripts/xs/update.sh"
-    host3.vm.network "public_network", bridge: "xenbr0"
-  end
-
-    config.vm.provider "xenserver" do |xs|
-       xs.memory = 4096
+      host.vm.provision "shell", path: "scripts/xs/update.sh"
+      host.vm.network "public_network", bridge: "xenbr0"
     end
+  end
+
+  config.vm.provider "xenserver" do |xs|
+    xs.memory = 4096
+  end
 end
 

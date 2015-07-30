@@ -1,6 +1,6 @@
 #!/usr/bin/env ocamlscript
 (* Thin lvhd tests *)
-Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"];
+Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"; "ezxmlm"];
 Ocaml.sources := ["../scripts/yorick.ml"]
 --
 open Yorick
@@ -8,54 +8,264 @@ open Lwt
 open Xen_api
 open Xen_api_lwt_unix
 
-let uri = ref "http://gandalf.uk.xensource.com"
+let uri ip = Printf.sprintf "http://%s" ip
 let username = ref "root"
 let password = ref "xenroot"
 
-let start_all () =
-  ?| "vagrant up host1 host2 infrastructure --parallel --provider=xenserver"
+type host_state =
+  | Slave of bytes
+  | Master
+
+type host = {
+  name : bytes;
+  ip : bytes;
+  uuid : bytes;
+}
+
+type iscsi_server = {
+  iscsi_ip : bytes;
+  iqn : bytes;
+}
+
+type state = {
+  hosts : host list;
+  pool : bytes; (* reference *)
+  master : bytes; (* reference *)
+  master_uuid : bytes; (* uuid *)
+  master_rpc : (Rpc.call -> Rpc.response Lwt.t);
+  master_session : bytes;
+  pool_setup : bool;
+  iscsi_sr : bytes option; (* reference *)
+  iscsi_sr_uuid : bytes option;
+}
+
+
+let start_all m =
+  let hosts = Array.init m (fun i -> i+1) |> Array.to_list |> List.map (Printf.sprintf "host%d") in
+  ?| (Printf.sprintf "vagrant up %s infrastructure --parallel --provider=xenserver" (String.concat " " hosts))
+
 
 let setup_infra () =
   let wwn = ?|> "vagrant ssh infrastructure -c \"/scripts/get_wwn.py\"" |> trim in
   let ip = ?|> "vagrant ssh infrastructure -c \"/scripts/get_ip.sh\"" |> trim in
-  (wwn,ip)
+  {iqn=wwn; iscsi_ip=ip}
 
-let setup_pool () =
-  let master_ip = ?|> "vagrant ssh host1 -c \"sudo xe host-list params=address --minimal\"" |> trim in
-  Printf.fprintf stderr "master_ip=%s" master_ip;
-  let slave_uuid = ?|> "vagrant ssh host2 -c \"sudo xe host-list params=uuid --minimal\"" |> trim in
-  Printf.fprintf stderr "slave_uuid=%s" slave_uuid;
-  ?|. "vagrant ssh host2 -c \"sudo xe pool-join master-address=%s master-username=root master-password=xenroot\"" master_ip;
+
+let get_hosts m =
+  let get_host n =
+    match
+      ?|> "vagrant ssh host%d -c \"/scripts/get_public_ip.sh\"" n |> trim |> Stringext.split ~on:','
+    with
+    | [uuid; ip] -> {name=(Printf.sprintf "host%d" n); ip; uuid}
+    | _ -> failwith "Failed to get host's uuid and IP"
+  in
+  List.map get_host (Array.init m (fun i -> i+1) |> Array.to_list)
+
+
+let get_state hosts =
+  let get_host_state host =
+    let rpc = make (uri host.ip) in
+    Lwt.catch
+      (fun () ->
+         Printf.printf "Checking host %s (ip=%s)..." host.name host.ip;
+         Session.login_with_password rpc "root" "xenroot" "1.0" >>=
+         fun _ ->
+         Printf.printf "master\n%!";
+         Lwt.return (host,Master))
+      (fun e ->
+         match e with
+         | Api_errors.Server_error("HOST_IS_SLAVE",[master]) ->
+           Printf.printf "slave\n%!";
+           Lwt.return (host, Slave master)
+         | e -> fail e)
+  in Lwt_list.map_s get_host_state hosts
+    
+
+let setup_pool hosts =
+  Printf.printf "Pool is not set up: Making it\n%!";
+  Lwt_list.map_p (fun host ->
+      let rpc = make (uri host.ip) in
+      Session.login_with_password rpc "root" "xenroot" "1.0"
+      >>= fun sess ->
+      Lwt.return (rpc,sess)) hosts
+  >>= fun rss ->
+  let slaves = List.tl rss in
+  Lwt_list.iter_p (fun (rpc,session_id) ->
+      Pool.join ~rpc ~session_id ~master_address:(List.hd hosts).ip
+        ~master_username:"root" ~master_password:"xenroot") slaves >>= fun () ->
+  Printf.printf "All slaves told to join: waiting for all to be enabled\n%!";
+  let rpc,session_id = List.hd rss in
   let rec wait () =
-    let enabled = ?|> "vagrant ssh host1 -c \"sudo xe host-list uuid=%s params=enabled --minimal\"" slave_uuid |> trim in
-    if enabled = "true" then () else (Unix.sleep 1; wait ())
-  in wait ();
-  Unix.sleep 10
+    Host.get_all_records ~rpc ~session_id >>= fun hrefrec ->
+    if List.exists (fun (_,r) -> not r.API.host_enabled) hrefrec
+    then (Lwt_unix.sleep 1.0 >>= fun () -> wait ())
+    else return ()
+  in wait ()
+  >>= fun () ->
+  Printf.printf "Everything enabled. Sleeping 10 seconds to prevent a race\n%!";
+  (* Nb. the following sleep is to prevent a race between SR.create and
+     thread_zero plugging all PBDs *)
+  Lwt_unix.sleep 30.0 >>= fun () ->
+  Pool.get_all ~rpc ~session_id >>=
+  fun pools ->
+  let pool = List.hd pools in
+  Pool.get_master ~rpc ~session_id ~self:pool >>=
+  fun master_ref ->
+  Host.get_uuid ~rpc ~session_id ~self:master_ref >>=
+  fun master_uuid ->
+  Lwt.return {
+    hosts = hosts;
+    pool = pool;
+    master = master_ref;
+    master_uuid = master_uuid;
+    master_rpc = rpc;
+    master_session = session_id;
+    pool_setup = true;
+    iscsi_sr = None;
+    iscsi_sr_uuid = None;
+  }
 
-let setup_acls () =
-  let hosts = ?|> "vagrant ssh host1 -c \"sudo xe host-list params=uuid --minimal\"" |> trim |> xapilist in
-  let acls = List.map (fun host -> ?|> "vagrant ssh host1 -c \"sudo xe host-param-get uuid=%s param-name=other-config param-key=iscsi_iqn\"" host |> trim) hosts in
-  List.iter (fun iqn -> ?|. "vagrant ssh infrastructure -c \"sudo /scripts/add_acl.py %s\"" iqn) acls
 
+let get_pool hosts =
+  get_state hosts >>= fun host_states ->
+  if List.filter (fun (_,s) -> s=Master) host_states |> List.length = 1
+  then begin
+    let master = fst (List.find (fun (_,s) -> s=Master) host_states) in
+    let rpc = make (uri master.ip) in
+    Session.login_with_password rpc "root" "xenroot" "1.0"
+    >>= fun session_id ->
+    Pool.get_all ~rpc ~session_id >>=
+    fun pools ->
+    let pool = List.hd pools in
+    Pool.get_master ~rpc ~session_id ~self:pool >>=
+    fun master_ref ->
+    Host.get_uuid ~rpc ~session_id ~self:master_ref >>=
+    fun master_uuid ->    
+    Lwt.return {
+      hosts = hosts;
+      pool = pool;
+      master = master_ref;
+      master_uuid = master_uuid;
+      master_rpc = rpc;
+      master_session = session_id;
+      pool_setup = true;
+      iscsi_sr = None;
+      iscsi_sr_uuid = None;
+    }
+  end else begin
+    setup_pool hosts
+  end
+
+
+let create_iscsi_sr state =
+  Printf.printf "Creating an ISCSI SR\n%!";
+  let rpc = state.master_rpc in
+  let iscsi = setup_infra () in
+  let session_id = state.master_session in
+  Lwt.catch
+    (fun () -> 
+       SR.probe ~rpc ~session_id ~host:state.master
+         ~device_config:["target", iscsi.iscsi_ip; "targetIQN", iscsi.iqn]
+         ~_type:"lvmoiscsi" ~sm_config:[])
+    (fun e -> match e with
+       | Api_errors.Server_error (_,[_;_;xml]) -> Lwt.return xml
+       | e -> Printf.printf "Got another error: %s\n" (Printexc.to_string e);
+         Lwt.return "<bad>")
+  >>= fun xml ->
+  let open Ezxmlm in
+  let (_,xmlm) = from_string xml in
+  let scsiid = xmlm |> member "iscsi-target" |> member "LUN" |> member "SCSIid" |> data_to_string in
+  Printf.printf "SR Probed: SCSIid=%s\n%!" scsiid;
+  SR.create ~rpc ~session_id ~host:state.master
+    ~device_config:["target", iscsi.iscsi_ip; "targetIQN", iscsi.iqn; "SCSIid", scsiid]
+    ~_type:"lvmoiscsi" ~physical_size:0L ~name_label:"xenvm"
+    ~name_description:"" ~content_type:""
+    ~sm_config:["allocation","dynamic"] ~shared:true
+
+  
+let get_iscsi_sr state =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  (match state.iscsi_sr with
+  | Some s -> Lwt.return s
+  | None ->
+    SR.get_all_records ~rpc ~session_id >>=
+    fun sr_ref_recs ->
+    let pred = fun (sr_ref, sr_rec) -> sr_rec.API.sR_type = "lvmoiscsi" in
+    if List.exists pred sr_ref_recs
+    then Lwt.return (List.find pred sr_ref_recs |> fst)
+    else create_iscsi_sr state)
+  >>= fun iscsi_sr ->
+  SR.get_uuid ~rpc ~session_id ~self:iscsi_sr
+  >>= fun iscsi_sr_uuid ->
+  Lwt.return { state with iscsi_sr = Some iscsi_sr; iscsi_sr_uuid = Some iscsi_sr_uuid}
+
+
+let get_control_domain state host =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  VM.get_all_records ~rpc ~session_id
+  >>= fun vms ->
+  List.find
+    (fun (vm_ref, vm_rec) ->
+       vm_rec.API.vM_resident_on=host && vm_rec.API.vM_is_control_domain)
+    vms |> fst |> Lwt.return
+
+
+let test_vdi_write state =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  match state.iscsi_sr, state.iscsi_sr_uuid with
+  | Some sr, Some sr_uuid ->
+    VDI.create ~rpc ~session_id ~name_label:"test_vdi" ~name_description:""
+      ~sR:sr ~virtual_size:(10737418240L) (* 10 gigs *)
+      ~_type:`user ~sharable:false ~read_only:false ~other_config:[] ~xenstore_data:[]
+      ~sm_config:["allocation_quantum","0.001"] ~tags:[]
+    >>= fun vdi ->
+    VDI.get_uuid ~rpc ~session_id ~self:vdi
+    >>= fun vdi_uuid ->
+    let master = state.master in
+    get_control_domain state master
+    >>= fun vm ->
+    VBD.create ~rpc ~session_id ~vM:vm ~vDI:vdi ~userdevice:"0" ~bootable:false
+      ~mode:`RW ~_type:`Disk ~unpluggable:true ~empty:false ~other_config:[]
+      ~qos_algorithm_type:"" ~qos_algorithm_params:[]
+    >>= fun vbd ->
+    VBD.plug ~rpc ~session_id ~self:vbd
+    >>= fun () ->
+    VBD.get_device ~rpc ~session_id ~self:vbd
+    >>= fun device ->
+    let cmd = Printf.sprintf "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 5368709120 write 3'" device in
+    ?|> "%s" cmd;
+    Lwt.return ()
+       
+  
 let get_uuid () =
   ?|> "ocamlscript scripts/get_vagrant_uuid.ml host3"
 
       
 let _ =
-  start_all ();
-  Printf.printf "XXXX started\n%!";
-  let (wwn,ip) = setup_infra () in
-  Printf.printf "XXXX setup_infra finished\n%!";
-  let _ = setup_pool () in
-  Printf.printf "XXXX setup_pool finished\n%!";
-(*  let _ = setup_acls () in*)
-(*  Printf.printf "XXXX setup_acls finished\n%!";*)
-  let xml = !?? (?|>) "vagrant ssh host1 -c \"sudo xe sr-probe type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s\" | grep \\<SCSIid\\> | head -n 1" ip wwn |> trim in
-  Printf.printf "XXXX probed\n%!";
-  let scsiid = String.sub xml 8 (String.length xml - 17) in
-  let sr = ?|> "vagrant ssh host1 -c \"sudo xe sr-create type=lvmoiscsi device-config:target=%s device-config:targetIQN=%s device-config:SCSIid=%s shared=true sm-config:allocation=dynamic name-label=thinlvhd\"" ip wwn scsiid in
-  Printf.printf "sr=%s\n%!" sr
-  
+  let th =
+    start_all 3;
+    Printf.printf "XXXX started\n%!";
+    let iscsi_info = setup_infra () in
+    Printf.printf "XXXX setup_infra finished\n%!";
+    let hosts = get_hosts 3 in
+    get_pool hosts
+    >>= fun state ->
+    get_iscsi_sr state
+    >>= fun state ->
+    (match state.iscsi_sr_uuid with Some x -> Printf.printf "Got SR uuid: %s\n%!" x | None -> Printf.printf "No ISCSI SR!\n%!");
+    test_vdi_write state
+    >>= fun () ->
+    Printf.printf "Created and plugged a VBD\n%!";
+    Lwt.return ()
+  in
+  Lwt_main.run th;
+
+(* Local Variables: *)
+(* mode: tuareg *)
+(* End: *)
   
 
 
