@@ -9,4 +9,5 @@ sudo xe pif-param-set uuid=$pif other-config:defaultroute=true
 sudo xe pif-unplug uuid=$pif
 sudo xe pif-plug uuid=$pif
 sudo mkdir -p /var/lib/xenvmd
+sudo chmod 777 /var/lib/xcp/xapi
 
