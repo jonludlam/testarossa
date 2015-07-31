@@ -11,7 +11,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.define "infrastructure" do |infra|
     infra.vm.box = "jonludlam/xs-centos-7"
     infra.vm.provision "shell", path: "scripts/infra/vagrant_provision.sh"
-    infra.vm.synced_folder "scripts/infra", "/scripts"
+    infra.vm.synced_folder "scripts/infra", "/scripts", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
     infra.vm.network "public_network", bridge: "xenbr0"
   end
 
@@ -20,8 +20,9 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       host.vm.box = "jonludlam/xs-thin-lvhd"
       host.vm.provision "shell",
         inline: "hostname host#{i}; echo host#{i} > /etc/hostname"
-      host.vm.synced_folder "xs", "/xs"
-      host.vm.synced_folder "scripts/xs", "/scripts"
+      host.vm.synced_folder "xs/rpms", "/rpms", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
+      host.vm.synced_folder "xs/opt", "/opt", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
+      host.vm.synced_folder "scripts/xs", "/scripts", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
 
       host.vm.provision "shell", path: "scripts/xs/update.sh"
       host.vm.network "public_network", bridge: "xenbr0"
