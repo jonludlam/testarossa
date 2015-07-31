@@ -1,7 +1,6 @@
 #!/bin/bash
 
-sudo rpm -ivh --force --nodeps /xs/*.rpm || true
-sudo cp /xs/xapi /opt/xensource/bin/ || true
+sudo rpm -ivh --force --nodeps /rpms/*.rpm || true
 sudo vagrant-xenserver-scripts/start.sh
 pif=`sudo xe pif-list device=eth1 --minimal`
 sudo xe pif-reconfigure-ip uuid=$pif mode=dhcp

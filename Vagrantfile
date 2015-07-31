@@ -20,7 +20,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       host.vm.box = "jonludlam/xs-thin-lvhd"
       host.vm.provision "shell",
         inline: "hostname host#{i}; echo host#{i} > /etc/hostname"
-      host.vm.synced_folder "xs/xs", "/xs", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
+      host.vm.synced_folder "xs/rpms", "/rpms", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
       host.vm.synced_folder "xs/opt", "/opt", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
       host.vm.synced_folder "scripts/xs", "/scripts", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
 
