@@ -1,0 +1,39 @@
+#!/usr/bin/env ocamlscript
+(* Thin lvhd tests *)
+Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"; "ezxmlm"];
+Ocaml.sources := ["../scripts/yorick.ml"; "test_common.ml"]
+--
+open Yorick
+open Lwt
+open Xen_api
+open Xen_api_lwt_unix
+open Test_common
+
+let quicktest state =
+  ?|> "vagrant ssh host1 -c /opt/xensource/debug/quicktest"
+
+let _ =
+  let th =
+    start_all 1;
+    Printf.printf "XXXX started\n%!";
+    let iscsi_info = setup_infra () in
+    Printf.printf "XXXX setup_infra finished\n%!";
+    let hosts = get_hosts 1 in
+    get_pool hosts
+    >>= fun state ->
+    get_iscsi_sr state
+    >>= fun state ->
+    (match state.iscsi_sr_uuid with Some x -> Printf.printf "Got SR uuid: %s\n%!" x | None -> Printf.printf "No ISCSI SR!\n%!");
+    quicktest state;
+    Printf.printf "Quicktest has run!\n%!";
+    Lwt.return ()
+  in
+  Lwt_main.run th;
+
+(* Local Variables: *)
+(* mode: tuareg *)
+(* End: *)
+  
+
+
+
