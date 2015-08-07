@@ -3,8 +3,8 @@
 import rtslib
 
 iscsi = rtslib.FabricModule("iscsi")
-f = rtslib.FileIOStorageObject("test1", "/tmp/test.img", 10000000000)
-f2 = rtslib.FileIOStorageObject("test2", "/tmp/test2.img", 10000000000)
+f = rtslib.FileIOStorageObject("test1", "/tmp/test.img", 20000000000)
+f2 = rtslib.FileIOStorageObject("test2", "/tmp/test2.img", 20000000000)
 target = rtslib.Target(iscsi)
 tpg = rtslib.TPG(target,1)
 tpg.enable = True
