@@ -30,8 +30,7 @@ type state = {
   master_rpc : (Rpc.call -> Rpc.response Lwt.t);
   master_session : bytes;
   pool_setup : bool;
-  iscsi_sr : bytes option; (* reference *)
-  iscsi_sr_uuid : bytes option;
+  iscsi_sr : (bytes * bytes) option; (* reference * uuid *)
 }
 
 
@@ -117,7 +116,6 @@ let setup_pool hosts =
     master_session = session_id;
     pool_setup = true;
     iscsi_sr = None;
-    iscsi_sr_uuid = None;
   }
 
 
@@ -145,7 +143,6 @@ let get_pool hosts =
       master_session = session_id;
       pool_setup = true;
       iscsi_sr = None;
-      iscsi_sr_uuid = None;
     }
   end else begin
     setup_pool hosts
@@ -175,9 +172,10 @@ let create_iscsi_sr state =
     ~device_config:["target", iscsi.iscsi_ip; "targetIQN", iscsi.iqn; "SCSIid", scsiid]
     ~_type:"lvmoiscsi" ~physical_size:0L ~name_label:"xenvm"
     ~name_description:"" ~content_type:""
-    ~sm_config:["allocation","xlvhd"] ~shared:true
+    ~sm_config:["allocation","xlvhd"] ~shared:true >>= fun ref ->
+  SR.get_uuid ~rpc ~session_id ~self:ref >>= fun uuid ->
+  return (ref, uuid)
 
-  
 let get_iscsi_sr state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
@@ -188,12 +186,12 @@ let get_iscsi_sr state =
     fun sr_ref_recs ->
     let pred = fun (sr_ref, sr_rec) -> sr_rec.API.sR_type = "lvmoiscsi" in
     if List.exists pred sr_ref_recs
-    then Lwt.return (List.find pred sr_ref_recs |> fst)
-    else create_iscsi_sr state)
-  >>= fun iscsi_sr ->
-  SR.get_uuid ~rpc ~session_id ~self:iscsi_sr
-  >>= fun iscsi_sr_uuid ->
-  Lwt.return { state with iscsi_sr = Some iscsi_sr; iscsi_sr_uuid = Some iscsi_sr_uuid}
+    then begin
+      let (rf, rc) = List.find pred sr_ref_recs in
+      Lwt.return (rf, rc.API.sR_uuid)
+    end else create_iscsi_sr state)
+  >>= fun (iscsi_sr_ref, iscsi_sr_uuid) ->
+  Lwt.return { state with iscsi_sr = Some (iscsi_sr_ref, iscsi_sr_uuid) }
 
 
 let get_control_domain state host =
