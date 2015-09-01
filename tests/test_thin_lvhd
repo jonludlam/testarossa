@@ -35,14 +35,14 @@ let with_vdi rpc session_id state vdi f =
 let test_vdi_write state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
-  let allocation_quantum = 0.001 in
-  let initial_allocation = 0.01 in
+  let allocation_quantum = 1 in
+  let initial_allocation = 0 in
   match state.iscsi_sr with
   | None -> failwith "No ISCSI SR"
   | Some (sr_ref, sr_uuid) ->
     let sm_config = [
-      "allocation_quantum", string_of_float allocation_quantum;
-      "initial_allocation", string_of_float initial_allocation;
+      "allocation_quantum", string_of_int allocation_quantum;
+      "initial_allocation", string_of_int initial_allocation;
     ] in
     Printf.printf "Creating VDI on SR %s...\n%!"  sr_uuid;
     VDI.create ~rpc ~session_id ~name_label:"test_vdi" ~name_description:""
