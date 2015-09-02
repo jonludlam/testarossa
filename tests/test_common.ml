@@ -62,7 +62,7 @@ let get_state hosts =
     Lwt.catch
       (fun () ->
          Printf.printf "Checking host %s (ip=%s)..." host.name host.ip;
-         Session.login_with_password rpc "root" "xenroot" "1.0" >>=
+         Session.login_with_password rpc "root" "xenroot" "1.0" "testarossa" >>=
          fun _ ->
          Printf.printf "master\n%!";
          Lwt.return (host,Master))
@@ -79,7 +79,7 @@ let setup_pool hosts =
   Printf.printf "Pool is not set up: Making it\n%!";
   Lwt_list.map_p (fun host ->
       let rpc = make (uri host.ip) in
-      Session.login_with_password rpc "root" "xenroot" "1.0"
+      Session.login_with_password rpc "root" "xenroot" "1.0" "testarossa"
       >>= fun sess ->
       Lwt.return (rpc,sess)) hosts
   >>= fun rss ->
@@ -125,7 +125,7 @@ let get_pool hosts =
   then begin
     let master = fst (List.find (fun (_,s) -> s=Master) host_states) in
     let rpc = make (uri master.ip) in
-    Session.login_with_password rpc "root" "xenroot" "1.0"
+    Session.login_with_password rpc "root" "xenroot" "1.0" "testarossa"
     >>= fun session_id ->
     Pool.get_all ~rpc ~session_id >>=
     fun pools ->
