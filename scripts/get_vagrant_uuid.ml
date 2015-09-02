@@ -17,7 +17,7 @@ let get_ref name = lwt_read (Printf.sprintf ".vagrant/machines/%s/xenserver/id" 
 let main name =
   let rpc = make !uri in
   let t =
-    Session.login_with_password rpc !username !password "1.0"
+    Session.login_with_password rpc !username !password "1.0" "testarossa"
     >>= fun session_id ->
     Lwt.catch
       (fun () ->
