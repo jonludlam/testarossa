@@ -28,12 +28,8 @@ let _ =
     Printf.printf "Quicktest has run!\n%!";
     Lwt.return ()
   in
-  Lwt_main.run th;
+  run_and_self_destruct th;
 
 (* Local Variables: *)
 (* mode: tuareg *)
 (* End: *)
-  
-
-
-

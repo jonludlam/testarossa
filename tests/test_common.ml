@@ -203,3 +203,19 @@ let get_control_domain state host =
     (fun (vm_ref, vm_rec) ->
        vm_rec.API.vM_resident_on=host && vm_rec.API.vM_is_control_domain)
     vms |> fst |> Lwt.return
+
+let run_and_self_destruct (t : 'a Lwt.t) : 'a =
+  let t' =
+    Lwt.finalize (fun () -> t) (fun () ->
+      let name = Sys.argv.(0) in
+      let ocamlscript_exe =
+        if Filename.check_suffix name "exe" then name else name ^ ".exe" in
+      if (try Unix.(access ocamlscript_exe [ F_OK ]); true with _ -> false)
+      then
+        Lwt_io.printlf "Unlinking ocamlscript compilation: %s" ocamlscript_exe
+        >>= fun () ->
+        Lwt_unix.unlink ocamlscript_exe
+      else return ()
+    )
+  in
+  Lwt_main.run t'
