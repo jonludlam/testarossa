@@ -4,6 +4,8 @@
 # Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
 VAGRANTFILE_API_VERSION = "2"
 
+LOCAL_BRANCH = ENV.fetch("LOCAL_BRANCH", "trunk-ring3")
+
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 # Disable default synced folder
   config.vm.synced_folder ".", "/vagrant", disabled: true
@@ -17,7 +19,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
   (1..3).each do |i|
     config.vm.define "host#{i}" do |host|
-      host.vm.box = "jonludlam/xs-thin-lvhd"
+      host.vm.box = "jonludlam/xs-#{LOCAL_BRANCH}"
       host.vm.provision "shell",
         inline: "hostname host#{i}; echo host#{i} > /etc/hostname"
       host.vm.synced_folder "xs/rpms", "/rpms", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
