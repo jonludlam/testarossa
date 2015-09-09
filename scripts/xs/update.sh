@@ -9,4 +9,6 @@ sudo xe pif-unplug uuid=$pif
 sudo xe pif-plug uuid=$pif
 sudo mkdir -p /var/lib/xenvmd
 sudo chmod 777 /var/lib/xcp/xapi
+host=`sudo xe host-list --minimal`
+sudo xe host-param-set uuid=$host other-config:multipathing=true other-config:multipathhandle=dmp
 
