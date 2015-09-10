@@ -14,7 +14,7 @@ let quicktest state =
 
 let _ =
   let th =
-    update_boxes ();
+    update_box "host1";
     start_all 1;
     Printf.printf "XXXX started\n%!";
     let iscsi_info = setup_infra () in

@@ -33,8 +33,8 @@ type state = {
   iscsi_sr : (bytes * bytes) option; (* reference * uuid *)
 }
 
-let update_boxes () =
-  ?| "vagrant box update"
+let update_box name =
+  ?| (Printf.sprintf "vagrant box update %s" name)
 
 let start_all m =
   let hosts = Array.init m (fun i -> i+1) |> Array.to_list |> List.map (Printf.sprintf "host%d") in
