@@ -93,7 +93,7 @@ let plug_unplug_loop state =
 
 let _ =
   let th =
-    update_boxes ();
+    update_box "host1";
     start_all 3;
     Printf.printf "XXXX started\n%!";
     let _ = setup_infra () in
