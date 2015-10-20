@@ -15,7 +15,7 @@ let with_vdi rpc session_id state vdi f =
   let master = state.master in
   get_control_domain state master
   >>= fun vm ->
-  VBD.create ~rpc ~session_id ~vM:vm ~vDI:vdi ~userdevice:"0" ~bootable:false
+  VBD.create ~rpc ~session_id ~vM:vm ~vDI:vdi ~userdevice:"autodetect" ~bootable:false
     ~mode:`RW ~_type:`Disk ~unpluggable:true ~empty:false ~other_config:[]
     ~qos_algorithm_type:"" ~qos_algorithm_params:[]
   >>= fun vbd ->
