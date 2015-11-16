@@ -9,29 +9,6 @@ open Xen_api
 open Xen_api_lwt_unix
 open Test_common
 
-let with_vdi rpc session_id state vdi f =
-  VDI.get_uuid ~rpc ~session_id ~self:vdi
-  >>= fun vdi_uuid ->
-  let master = state.master in
-  get_control_domain state master
-  >>= fun vm ->
-  VBD.create ~rpc ~session_id ~vM:vm ~vDI:vdi ~userdevice:"autodetect" ~bootable:false
-    ~mode:`RW ~_type:`Disk ~unpluggable:true ~empty:false ~other_config:[]
-    ~qos_algorithm_type:"" ~qos_algorithm_params:[]
-  >>= fun vbd ->
-  VBD.get_uuid ~rpc ~session_id ~self:vbd >>= fun vbd_uuid ->
-  Printf.printf "Plugging VDI (VBD=%s) to dom0...\n%!" vbd_uuid;
-  VBD.plug ~rpc ~session_id ~self:vbd >>= fun () ->
-  Printf.printf "Done!\n%!";
-  VBD.get_device ~rpc ~session_id ~self:vbd
-  >>= fun device ->
-  finalize
-    (fun () -> return (f device))
-    (fun () ->
-      Printf.printf "Unplugging VDI (VBD=%s) from dom0...\n%!" vbd_uuid;
-      VBD.unplug ~rpc ~session_id ~self:vbd >>= fun () ->
-      return (Printf.printf "Done!\n%!"))
-
 let test_vdi_write state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
@@ -51,10 +28,8 @@ let test_vdi_write state =
       ~sm_config ~tags:[]
     >>= fun vdi ->
     with_vdi rpc session_id state vdi (fun device ->
-      ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 5368709120 write 3'" device;
-      ?|> "vagrant ssh host1 -c 'sudo md5sum /dev/%s'" device)
-    >>= fun md5 ->
-    Printf.printf "md5sum=%s\n%!" md5;
+      ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 5368709120 write 3'" device)
+     >>= fun () -> 
     (* Printf.printf "Copying VDI...\n%!"; *)
     (* VDI.copy ~rpc ~session_id ~vdi ~sr:sr_ref *)
     (* >>= fun new_vdi_ref -> *)

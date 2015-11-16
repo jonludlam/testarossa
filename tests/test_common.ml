@@ -34,7 +34,7 @@ type state = {
 }
 
 let update_box name =
-  ?| (Printf.sprintf "vagrant box update %s" name)
+  ?| (Printf.sprintf "vagrant box update %s --provider=xenserver" name)
 
 let start_all m =
   let hosts = Array.init m (fun i -> i+1) |> Array.to_list |> List.map (Printf.sprintf "host%d") in
@@ -205,6 +205,31 @@ let get_control_domain state host =
     (fun (vm_ref, vm_rec) ->
        vm_rec.API.vM_resident_on=host && vm_rec.API.vM_is_control_domain)
     vms |> fst |> Lwt.return
+
+
+let with_vdi rpc session_id state vdi f =
+  VDI.get_uuid ~rpc ~session_id ~self:vdi
+  >>= fun vdi_uuid ->
+  let master = state.master in
+  get_control_domain state master
+  >>= fun vm ->
+  VBD.create ~rpc ~session_id ~vM:vm ~vDI:vdi ~userdevice:"autodetect" ~bootable:false
+    ~mode:`RW ~_type:`Disk ~unpluggable:true ~empty:false ~other_config:[]
+    ~qos_algorithm_type:"" ~qos_algorithm_params:[]
+  >>= fun vbd ->
+  VBD.get_uuid ~rpc ~session_id ~self:vbd >>= fun vbd_uuid ->
+  Printf.printf "Plugging VDI (VBD=%s) to dom0...\n%!" vbd_uuid;
+  VBD.plug ~rpc ~session_id ~self:vbd >>= fun () ->
+  Printf.printf "Done!\n%!";
+  VBD.get_device ~rpc ~session_id ~self:vbd
+  >>= fun device ->
+  finalize
+    (fun () -> return (f device))
+    (fun () ->
+      Printf.printf "Unplugging VDI (VBD=%s) from dom0...\n%!" vbd_uuid;
+      VBD.unplug ~rpc ~session_id ~self:vbd >>= fun () ->
+      return (Printf.printf "Done!\n%!"))
+
 
 let run_and_self_destruct (t : 'a Lwt.t) : 'a =
   let t' =
