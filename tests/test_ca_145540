@@ -1,0 +1,77 @@
+#!/usr/bin/env ocamlscript
+(* Thin lvhd tests *)
+Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"; "ezxmlm"; "lwt.preemptive"];
+Ocaml.sources := ["../scripts/yorick.ml"; "test_common.ml"];
+Ocaml.ocamlflags := ["-thread"]
+--
+open Yorick
+open Lwt
+open Xen_api
+open Xen_api_lwt_unix
+open Test_common
+
+
+let test_vdi_write state =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  get_local_sr state state.master >>= fun (sr_ref, sr_rec) ->
+  let sr_uuid = sr_rec.API.sR_uuid in
+  let finished = ref false in
+  Printf.printf "Creating VDI on SR %s...\n%!"  sr_uuid;
+  VDI.create ~rpc ~session_id ~name_label:"test_vdi" ~name_description:""
+    ~sR:sr_ref ~virtual_size:(1073741824L) (* 1 gig *)
+    ~_type:`user ~sharable:false ~read_only:false ~other_config:[] ~xenstore_data:[]
+    ~sm_config:[] ~tags:[]
+  >>= fun vdi ->
+  let rec loop n =
+    if !finished then Lwt.return () else begin
+      Printf.printf "loop iter %d\n%!" n;
+      with_vdi rpc session_id state vdi (fun device ->
+          ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 536870912 write 1'" device)
+      >>= fun _ ->
+      VDI.copy ~rpc ~session_id ~vdi ~sr:sr_ref ~base_vdi:"" ~into_vdi:""
+      >>= fun res ->
+      VDI.destroy ~rpc ~session_id ~self:res
+      >>= fun () ->
+      loop (n+1)
+    end
+  in
+  let rec snapshot snaps =
+    if !finished then Lwt.return () else begin
+      (if List.length snaps > 5
+      then begin
+        let last = List.hd (List.rev snaps) in
+        let rest = List.rev (List.tl (List.rev snaps)) in
+        VDI.destroy ~rpc ~session_id ~self:last >>= fun () ->
+        Lwt.return rest
+      end else begin
+        Lwt.return snaps
+      end)
+      >>= fun snaps ->
+      VDI.snapshot ~rpc ~session_id ~vdi ~driver_params:[] >>= fun snap ->
+      Lwt_unix.sleep 5.0 >>= fun () ->
+      snapshot (snap::snaps)
+    end
+  in
+  let snapth = snapshot [] in
+  let copyth = loop 0 in
+  Lwt_unix.sleep 3600.0 >>= fun () ->
+  finished := true;
+  snapth >>= fun () -> copyth
+  
+let _ =
+  let th =
+    update_box "host1";
+    start_all 1;
+    let hosts = get_hosts 1 in
+    get_pool hosts
+    >>= fun state ->
+    Printf.printf "XXXX started\n%!";
+    test_vdi_write state >>= fun _ ->
+    Lwt.return ()
+  in
+  run_and_self_destruct th;
+
+(* Local Variables: *)
+(* mode: tuareg *)
+(* End: *)

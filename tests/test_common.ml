@@ -75,7 +75,22 @@ let get_state hosts =
            Lwt.return (host, Slave master)
          | e -> fail e)
   in Lwt_list.map_s get_host_state hosts
-    
+
+
+let get_local_sr state host_ref =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  PBD.get_all_records ~rpc ~session_id
+  >>= fun pbds ->
+  let my_pbds = List.filter (fun (_ref,_rec) -> _rec.API.pBD_host = host_ref) pbds in
+  Lwt_list.map_s (fun (_ref, _rec) -> SR.get_record ~rpc ~session_id ~self:_rec.API.pBD_SR >>= fun sr -> Lwt.return (_rec.API.pBD_SR, sr)) my_pbds
+  >>= fun srs ->
+  let lvm_srs = List.filter (fun (_ref, _rec) -> _rec.API.sR_type = "lvm") srs in
+  match lvm_srs with
+  | [] -> Lwt.fail (Failure "No local SRs found")
+  | [s] -> Lwt.return s
+  | _ -> Lwt.fail (Failure "Multiple local SRs found")
+
 
 let setup_pool hosts =
   Printf.printf "Pool is not set up: Making it\n%!";
@@ -224,7 +239,7 @@ let with_vdi rpc session_id state vdi f =
   VBD.get_device ~rpc ~session_id ~self:vbd
   >>= fun device ->
   finalize
-    (fun () -> return (f device))
+    (fun () -> Lwt_preemptive.detach f device)
     (fun () ->
       Printf.printf "Unplugging VDI (VBD=%s) from dom0...\n%!" vbd_uuid;
       VBD.unplug ~rpc ~session_id ~self:vbd >>= fun () ->
