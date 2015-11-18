@@ -189,7 +189,7 @@ let create_iscsi_sr state =
     ~device_config:["target", iscsi.iscsi_ip; "targetIQN", iscsi.iqn; "SCSIid", scsiid]
     ~_type:"lvmoiscsi" ~physical_size:0L ~name_label:"xenvm"
     ~name_description:"" ~content_type:""
-    ~sm_config:["allocation","xlvhd"] ~shared:true >>= fun ref ->
+    ~sm_config:[(*"allocation","xlvhd"*)] ~shared:true >>= fun ref ->
   SR.get_uuid ~rpc ~session_id ~self:ref >>= fun uuid ->
   return (ref, uuid)
 

@@ -10,25 +10,29 @@ open Xen_api
 open Xen_api_lwt_unix
 open Test_common
 
+let meg = Int64.mul 1024L 1024L
 
 let test_vdi_write state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
-  get_local_sr state state.master >>= fun (sr_ref, sr_rec) ->
-  let sr_uuid = sr_rec.API.sR_uuid in
+  match state.iscsi_sr with
+  | None -> failwith "No ISCSI SR"
+  | Some (sr_ref, sr_uuid) ->
   let finished = ref false in
   Printf.printf "Creating VDI on SR %s...\n%!"  sr_uuid;
   VDI.create ~rpc ~session_id ~name_label:"test_vdi" ~name_description:""
-    ~sR:sr_ref ~virtual_size:(1073741824L) (* 1 gig *)
+    ~sR:sr_ref ~virtual_size:(Int64.mul 10L meg) (* 10 meg *)
     ~_type:`user ~sharable:false ~read_only:false ~other_config:[] ~xenstore_data:[]
     ~sm_config:[] ~tags:[]
   >>= fun vdi ->
   let rec loop n =
     if !finished then Lwt.return () else begin
       Printf.printf "loop iter %d\n%!" n;
+      Printf.printf "Writing to disk\n%!";
       with_vdi rpc session_id state vdi (fun device ->
-          ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 536870912 write 1'" device)
+          ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 5368701 write 3'" device)
       >>= fun _ ->
+      Printf.printf "Copying disk\n%!";
       VDI.copy ~rpc ~session_id ~vdi ~sr:sr_ref ~base_vdi:"" ~into_vdi:""
       >>= fun res ->
       VDI.destroy ~rpc ~session_id ~self:res
@@ -42,12 +46,14 @@ let test_vdi_write state =
       then begin
         let last = List.hd (List.rev snaps) in
         let rest = List.rev (List.tl (List.rev snaps)) in
+        Printf.printf "Destroying a snapshot\n%!";
         VDI.destroy ~rpc ~session_id ~self:last >>= fun () ->
         Lwt.return rest
       end else begin
         Lwt.return snaps
       end)
       >>= fun snaps ->
+      Printf.printf "Taking a snapshot\n%!";
       VDI.snapshot ~rpc ~session_id ~vdi ~driver_params:[] >>= fun snap ->
       Lwt_unix.sleep 5.0 >>= fun () ->
       snapshot (snap::snaps)
@@ -55,7 +61,7 @@ let test_vdi_write state =
   in
   let snapth = snapshot [] in
   let copyth = loop 0 in
-  Lwt_unix.sleep 3600.0 >>= fun () ->
+  Lwt_unix.sleep 600.0 >>= fun () ->
   finished := true;
   snapth >>= fun () -> copyth
   
@@ -65,6 +71,8 @@ let _ =
     start_all 1;
     let hosts = get_hosts 1 in
     get_pool hosts
+    >>= fun state ->
+    get_iscsi_sr state
     >>= fun state ->
     Printf.printf "XXXX started\n%!";
     test_vdi_write state >>= fun _ ->
