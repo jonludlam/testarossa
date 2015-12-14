@@ -14,6 +14,8 @@ let meg = Int64.mul 1024L 1024L
 
 let test_vdi_write state =
   let rpc = state.master_rpc in
+  let size = Int64.mul 100L meg in
+  let size_in_secs = Int64.div size 512L in
   let session_id = state.master_session in
   match state.iscsi_sr with
   | None -> failwith "No ISCSI SR"
@@ -21,16 +23,18 @@ let test_vdi_write state =
   let finished = ref false in
   Printf.printf "Creating VDI on SR %s...\n%!"  sr_uuid;
   VDI.create ~rpc ~session_id ~name_label:"test_vdi" ~name_description:""
-    ~sR:sr_ref ~virtual_size:(Int64.mul 10L meg) (* 10 meg *)
+    ~sR:sr_ref ~virtual_size:size
     ~_type:`user ~sharable:false ~read_only:false ~other_config:[] ~xenstore_data:[]
     ~sm_config:[] ~tags:[]
   >>= fun vdi ->
   let rec loop n =
     if !finished then Lwt.return () else begin
-      Printf.printf "loop iter %d\n%!" n;
+      let seek = Random.int64 (Int64.sub size_in_secs 4096L) in
+      let count = Random.int64 4096L in
+      Printf.printf "loop iter %d - dd seek=%Ld bs=512 count=%Ld\n%!" n seek count;
       Printf.printf "Writing to disk\n%!";
       with_vdi rpc session_id state vdi (fun device ->
-          ?|~ "vagrant ssh host1 -c 'sudo /scripts/patterns.py /dev/%s 5368701 write 3'" device)
+          ?|~ "vagrant ssh host1 -c 'sudo dd if=/dev/urandom of=/dev/%s bs=512 seek=%Ld count=%Ld'" device seek count)
       >>= fun _ ->
       Printf.printf "Copying disk\n%!";
       VDI.copy ~rpc ~session_id ~vdi ~sr:sr_ref ~base_vdi:"" ~into_vdi:""
@@ -42,21 +46,20 @@ let test_vdi_write state =
   in
   let rec snapshot snaps =
     if !finished then Lwt.return () else begin
-      (if List.length snaps > 5
-      then begin
-        let last = List.hd (List.rev snaps) in
-        let rest = List.rev (List.tl (List.rev snaps)) in
-        Printf.printf "Destroying a snapshot\n%!";
-        VDI.destroy ~rpc ~session_id ~self:last >>= fun () ->
-        Lwt.return rest
-      end else begin
-        Lwt.return snaps
-      end)
-      >>= fun snaps ->
+      Printf.printf "Destroying all snapshot\n%!";
+      Lwt_list.iter_s (fun self -> VDI.destroy ~rpc ~session_id ~self >>= fun () -> SR.scan ~rpc ~session_id ~sr:sr_ref) snaps >>= fun () ->
       Printf.printf "Taking a snapshot\n%!";
-      VDI.snapshot ~rpc ~session_id ~vdi ~driver_params:[] >>= fun snap ->
+      Lwt.catch (fun () ->
+          VDI.snapshot ~rpc ~session_id ~vdi ~driver_params:[]
+          >>= fun snap -> Lwt.return (Some snap))
+        (fun e -> Printf.printf "Caught exception: %s\n%!" (Printexc.to_string e); Lwt.return None)
+      >>= fun snap ->
       Lwt_unix.sleep 5.0 >>= fun () ->
-      snapshot (snap::snaps)
+      match snap with
+      | Some snap ->
+        snapshot [snap]
+      | None ->
+        snapshot [] 
     end
   in
   let snapth = snapshot [] in
@@ -66,6 +69,7 @@ let test_vdi_write state =
   snapth >>= fun () -> copyth
   
 let _ =
+  Random.self_init ();
   let th =
     update_box "host1";
     start_all 1;
