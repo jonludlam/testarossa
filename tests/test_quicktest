@@ -1,5 +1,4 @@
 #!/usr/bin/env ocamlscript
-(* Thin lvhd tests *)
 Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"; "ezxmlm"];
 Ocaml.sources := ["../scripts/yorick.ml"; "test_common.ml"]
 --
