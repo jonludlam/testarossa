@@ -29,7 +29,3 @@ let _ =
     Lwt.return ()
   in
   run_and_self_destruct th;
-
-(* Local Variables: *)
-(* mode: tuareg *)
-(* End: *)
