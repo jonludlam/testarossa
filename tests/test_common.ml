@@ -172,9 +172,9 @@ let create_iscsi_sr state =
   Printf.printf "SR Probed: SCSIid=%s\n%!" scsiid;
   SR.create ~rpc ~session_id ~host:state.master
     ~device_config:["target", iscsi.iscsi_ip; "targetIQN", iscsi.iqn; "SCSIid", scsiid]
-    ~_type:"lvmoiscsi" ~physical_size:0L ~name_label:"xenvm"
+    ~_type:"lvmoiscsi" ~physical_size:0L ~name_label:"iscsi-sr"
     ~name_description:"" ~content_type:""
-    ~sm_config:["allocation","xlvhd"] ~shared:true >>= fun ref ->
+    ~sm_config:[] ~shared:true >>= fun ref ->
   SR.get_uuid ~rpc ~session_id ~self:ref >>= fun uuid ->
   return (ref, uuid)
 
