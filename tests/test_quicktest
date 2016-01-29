@@ -16,14 +16,14 @@ let _ =
     update_box "host1";
     start_all 1;
     Printf.printf "XXXX started\n%!";
-    let iscsi_info = setup_infra () in
+    let _ = setup_infra () in
     Printf.printf "XXXX setup_infra finished\n%!";
     let hosts = get_hosts 1 in
     get_pool hosts
     >>= fun state ->
     get_iscsi_sr state
     >>= fun state ->
-    (match state.iscsi_sr_uuid with Some x -> Printf.printf "Got SR uuid: %s\n%!" x | None -> Printf.printf "No ISCSI SR!\n%!");
+    (match state.iscsi_sr with Some (_, uuid) -> Printf.printf "Got SR uuid: %s\n%!" uuid | None -> Printf.printf "No ISCSI SR!\n%!");
     quicktest state;
     Printf.printf "Quicktest has run!\n%!";
     Lwt.return ()
