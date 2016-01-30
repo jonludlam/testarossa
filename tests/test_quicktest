@@ -8,24 +8,36 @@ open Xen_api
 open Xen_api_lwt_unix
 open Test_common
 
-let quicktest state =
-  ?|> "vagrant ssh host1 -c 'sudo /opt/xensource/debug/quicktest'"
-
 let _ =
   let th =
+    echo "Udpating vagrant box to latest version";
     update_box "host1";
+    echo "Starting up host";
     start_all 1;
-    Printf.printf "XXXX started\n%!";
+    echo "Setting up infrastructure VM for iSCSI export";
     let _ = setup_infra () in
-    Printf.printf "XXXX setup_infra finished\n%!";
     let hosts = get_hosts 1 in
     get_pool hosts
     >>= fun state ->
+    echo "Creating shared iSCSI SR";
     get_iscsi_sr state
     >>= fun state ->
-    (match state.iscsi_sr with Some (_, uuid) -> Printf.printf "Got SR uuid: %s\n%!" uuid | None -> Printf.printf "No ISCSI SR!\n%!");
-    quicktest state;
-    Printf.printf "Quicktest has run!\n%!";
+    begin match state.iscsi_sr with
+    | Some (_, uuid) -> echo "iSCSI SR uuid: %s%!" uuid
+    | None -> echo "No iSCSI SR!"
+    end;
+    echo "Running quicktest...";
+    !?* (?|>) "vagrant ssh host1 -c 'sudo /opt/xensource/debug/quicktest'"
+    |> fun (stdout, rc) ->
+    echo "---[ BEGIN OUTPUT FROM QUICKTEST ]---";
+    echo "%s" (trim stdout);
+    echo "---[  END OUTPUT FROM QUICKTEST  ]---";
+    begin match rc with
+    | 0 -> echo "Quicktest finished successfully!";
+    | _ ->
+      echo "Quicktest failed (exit code %d)" rc;
+      exit rc;
+    end;
     Lwt.return ()
   in
   run_and_self_destruct th;
