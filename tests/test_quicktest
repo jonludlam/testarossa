@@ -1,5 +1,4 @@
 #!/usr/bin/env ocamlscript
-(* Thin lvhd tests *)
 Ocaml.packs := ["lwt"; "xen-api-client.lwt"; "re"; "ezxmlm"];
 Ocaml.sources := ["../scripts/yorick.ml"; "test_common.ml"]
 --
@@ -9,28 +8,36 @@ open Xen_api
 open Xen_api_lwt_unix
 open Test_common
 
-let quicktest state =
-  ?|> "vagrant ssh host1 -c /opt/xensource/debug/quicktest"
+let quicktest_cmd = "vagrant ssh host1 -c 'sudo /opt/xensource/debug/quicktest'"
 
 let _ =
   let th =
+    echo "Udpating vagrant box to latest version";
     update_box "host1";
+    echo "Starting up host";
     start_all 1;
-    Printf.printf "XXXX started\n%!";
-    let iscsi_info = setup_infra () in
-    Printf.printf "XXXX setup_infra finished\n%!";
+    echo "Setting up infrastructure VM for iSCSI export";
+    let _ = setup_infra () in
     let hosts = get_hosts 1 in
     get_pool hosts
     >>= fun state ->
+    echo "Creating shared iSCSI SR";
     get_iscsi_sr state
     >>= fun state ->
-    (match state.iscsi_sr_uuid with Some x -> Printf.printf "Got SR uuid: %s\n%!" x | None -> Printf.printf "No ISCSI SR!\n%!");
-    quicktest state;
-    Printf.printf "Quicktest has run!\n%!";
-    Lwt.return ()
+    begin match state.iscsi_sr with
+    | Some (_, uuid) -> echo "iSCSI SR uuid: %s%!" uuid
+    | None -> echo "No iSCSI SR!"
+    end;
+    echo "Running quicktest...";
+    match !?* (?|>) "%s" quicktest_cmd with
+    | (_, 0) ->
+      echo "Quicktest finished successfully!";
+      Lwt.return ();
+    | (stdout, rc) ->
+      echo "---[ BEGIN OUTPUT FROM QUICKTEST ]---";
+      echo "%s" (trim stdout);
+      echo "---[  END OUTPUT FROM QUICKTEST  ]---";
+      echo "Quicktest failed (exit code %d)" rc;
+      exit rc;
   in
   run_and_self_destruct th;
-
-(* Local Variables: *)
-(* mode: tuareg *)
-(* End: *)
