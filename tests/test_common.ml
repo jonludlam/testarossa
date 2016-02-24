@@ -75,7 +75,7 @@ let get_state hosts =
            Lwt.return (host, Slave master)
          | e -> fail e)
   in Lwt_list.map_s get_host_state hosts
-    
+
 
 let setup_pool hosts =
   Printf.printf "Pool is not set up: Making it\n%!";
@@ -178,6 +178,7 @@ let create_iscsi_sr state =
   SR.get_uuid ~rpc ~session_id ~self:ref >>= fun uuid ->
   return (ref, uuid)
 
+
 let get_iscsi_sr state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
@@ -195,16 +196,6 @@ let get_iscsi_sr state =
   >>= fun (iscsi_sr_ref, iscsi_sr_uuid) ->
   Lwt.return { state with iscsi_sr = Some (iscsi_sr_ref, iscsi_sr_uuid) }
 
-
-let get_control_domain state host =
-  let rpc = state.master_rpc in
-  let session_id = state.master_session in
-  VM.get_all_records ~rpc ~session_id
-  >>= fun vms ->
-  List.find
-    (fun (vm_ref, vm_rec) ->
-       vm_rec.API.vM_resident_on=host && vm_rec.API.vM_is_control_domain)
-    vms |> fst |> Lwt.return
 
 let run_and_self_destruct (t : 'a Lwt.t) : 'a =
   let t' =
