@@ -26,6 +26,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       host.vm.synced_folder "xs/opt", "/opt", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
       host.vm.synced_folder "xs/sbin", "/sbin", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
       host.vm.synced_folder "xs/bin", "/bin", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
+      host.vm.synced_folder "xs/boot", "/boot", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
       host.vm.synced_folder "scripts/xs", "/scripts", type: "rsync", rsync__args: ["--verbose", "--archive", "-z", "--copy-links"]
 
       host.vm.provision "shell", path: "scripts/xs/update.sh"

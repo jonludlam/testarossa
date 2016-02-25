@@ -7,6 +7,9 @@ let uri ip = Printf.sprintf "http://%s" ip
 let username = ref "root"
 let password = ref "xenroot"
 
+let meg = Int64.mul 1024L 1024L
+let meg32 = Int64.mul meg 32L
+
 type host_state =
   | Slave of bytes
   | Master
@@ -31,6 +34,7 @@ type state = {
   master_session : bytes;
   pool_setup : bool;
   iscsi_sr : (bytes * bytes) option; (* reference * uuid *)
+  mirage_vm : bytes option; (* reference *)
 }
 
 let update_box name =
@@ -118,6 +122,7 @@ let setup_pool hosts =
     master_session = session_id;
     pool_setup = true;
     iscsi_sr = None;
+    mirage_vm = None;
   }
 
 
@@ -145,6 +150,7 @@ let get_pool hosts =
       master_session = session_id;
       pool_setup = true;
       iscsi_sr = None;
+      mirage_vm = None;
     }
   end else begin
     setup_pool hosts
@@ -195,6 +201,47 @@ let get_iscsi_sr state =
     end else create_iscsi_sr state)
   >>= fun (iscsi_sr_ref, iscsi_sr_uuid) ->
   Lwt.return { state with iscsi_sr = Some (iscsi_sr_ref, iscsi_sr_uuid) }
+
+
+let find_template rpc session_id name =
+  VM.get_all_records rpc session_id >>= fun vms ->
+  let filtered = List.filter (fun (_, record) ->
+      (name = record.API.vM_name_label) &&
+      record.API.vM_is_a_template)
+      vms in
+  match filtered with
+  | [] -> Lwt.return None
+  | (x,_) :: _ -> Lwt.return (Some x)
+
+
+let create_mirage_vm state =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  find_template rpc session_id "Other install media" >>= fun template_opt ->
+  let template = 
+    match template_opt with
+    | Some vm -> vm
+    | None -> 
+      Printf.fprintf stderr "Failed to find suitable template";
+      failwith "No template"
+  in
+  VM.clone rpc session_id template "mirage" >>= fun vm ->
+  VM.provision rpc session_id vm >>= fun _ ->
+  VM.set_PV_kernel rpc session_id vm "/boot/guest/mir-suspend.xen.gz" >>= fun () ->
+  VM.set_HVM_boot_policy rpc session_id vm "" >>= fun () ->
+  VM.set_memory_limits ~rpc ~session_id ~self:vm ~static_min:meg32 ~static_max:meg32 ~dynamic_min:meg32 ~dynamic_max:meg32 >>= fun () ->
+  Lwt.return ({state with mirage_vm = Some vm}, vm)
+
+let find_or_create_mirage_vm state =
+  let rpc = state.master_rpc in
+  let session_id = state.master_session in
+  VM.get_all_records_where ~rpc ~session_id ~expr:"field \"name__label\"=\"mirage\""
+  >>= fun vms ->
+  if List.length vms > 0 then
+    let vm = List.hd vms |> fst in
+    Lwt.return ({state with mirage_vm = Some vm}, vm)
+  else
+    create_mirage_vm state
 
 
 let run_and_self_destruct (t : 'a Lwt.t) : 'a =
