@@ -21,6 +21,7 @@ let _ =
     let hosts = get_hosts 1 in
     get_pool hosts
     >>= fun state ->
+    find_or_create_mirage_vm state >>= fun (state,vm) ->
     echo "Creating shared iSCSI SR";
     get_iscsi_sr state
     >>= fun state ->
