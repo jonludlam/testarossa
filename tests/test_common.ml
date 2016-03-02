@@ -236,11 +236,11 @@ let find_or_create_mirage_vm state =
   let rpc = state.master_rpc in
   let session_id = state.master_session in
   VM.get_all_records_where ~rpc ~session_id ~expr:"field \"name__label\"=\"mirage\""
-  >>= fun vms ->
-  if List.length vms > 0 then
-    let vm = List.hd vms |> fst in
+  >>= function
+  | vmrefrec::_ ->
+    let vm = fst vmrefrec in
     Lwt.return ({state with mirage_vm = Some vm}, vm)
-  else
+  | [] ->
     create_mirage_vm state
 
 
